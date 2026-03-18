@@ -1,6 +1,14 @@
 # Vertex AI Playground
 
-Sample application to explore Google Vertex AI integration using the [Google Gen AI Python SDK](https://github.com/googleapis/python-genai).
+Sample application to explore Google Gemini integration using the [Google Gen AI Python SDK](https://github.com/googleapis/python-genai).
+
+Supports three backends out of the box:
+
+| Backend | Auth | Use case |
+|---------|------|----------|
+| **Vertex AI** | Application Default Credentials | Production / GCP-native |
+| **Gemini Developer API** | API key | Quick prototyping |
+| **NeuralTrust Gateway** | ADC Bearer + TG API key | Proxied access via NeuralTrust |
 
 Two entry points are provided:
 
@@ -12,8 +20,10 @@ Two entry points are provided:
 ## Prerequisites
 
 - Python 3.10+
-- A Google Cloud project with the **Vertex AI API** enabled
-- Authenticated locally: `gcloud auth application-default login`
+- One of the following, depending on the backend:
+  - **Vertex AI** — A Google Cloud project with the Vertex AI API enabled, authenticated locally via `gcloud auth application-default login`
+  - **Gemini Developer API** — A Gemini API key from [Google AI Studio](https://aistudio.google.com/)
+  - **NeuralTrust Gateway** — A NeuralTrust API key + GCP credentials
 
 ## Setup
 
@@ -27,47 +37,73 @@ pip install -r requirements.txt
 
 # 3. Configure environment variables
 cp .env.example .env
-# Edit .env — set VERTEX_AI_ENDPOINT at minimum (see below)
+# Edit .env — pick a backend and fill in the required values (see below)
 ```
 
 ---
 
 ## Configuration — `.env`
 
-Connection to Vertex AI is resolved by `vertex_config.py` from a single `VERTEX_AI_ENDPOINT` variable. Two formats are supported:
+Set `GENAI_BACKEND` to choose how the SDK connects to Gemini. Configuration is resolved by `genai_config.py`.
 
-### Option A — Full URL (recommended)
+### Backend: Vertex AI (default)
 
-Paste the complete Vertex AI endpoint URL. Project, location, model, and API version are all parsed from it automatically — no other variables needed.
+```bash
+GENAI_BACKEND=vertex
+```
+
+Two endpoint formats are supported:
+
+**Option A — Full URL (recommended).** Project, location, model, and API version are all parsed from the URL automatically.
 
 ```bash
 VERTEX_AI_ENDPOINT=https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent
 ```
 
-### Option B — Base URL + individual variables
-
-Set only the hostname and control each segment separately.
+**Option B — Base URL + individual variables.**
 
 ```bash
 VERTEX_AI_ENDPOINT=https://us-central1-aiplatform.googleapis.com
-VERTEX_AI_API_VERSION=v1beta1   # v1beta1 (preview) | v1 (stable)
 GOOGLE_CLOUD_PROJECT=my-project
 GOOGLE_CLOUD_LOCATION=us-central1
+VERTEX_AI_API_VERSION=v1beta1
+MODEL_ID=gemini-2.5-flash
+```
+
+> When a full URL is set, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `MODEL_ID`, and `VERTEX_AI_API_VERSION` are all ignored — every value comes from the URL.
+
+### Backend: Gemini Developer API
+
+```bash
+GENAI_BACKEND=gemini
+GEMINI_API_KEY=your-api-key
+MODEL_ID=gemini-2.5-flash          # optional, defaults to gemini-2.5-flash
+```
+
+### Backend: NeuralTrust Gateway
+
+```bash
+GENAI_BACKEND=gateway
+NEURALTRUST_GATEWAY_URL=https://gateway.neuraltrust.ai/vertex
+NEURALTRUST_API_KEY=your-tg-api-key
+GOOGLE_CLOUD_PROJECT=my-project
 MODEL_ID=gemini-2.5-flash
 ```
 
 ### All variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `VERTEX_AI_ENDPOINT` | Full URL **or** base hostname (see above) | yes |
-| `VERTEX_AI_API_VERSION` | API channel — `v1beta1` or `v1` | no — default `v1beta1` |
-| `GOOGLE_CLOUD_PROJECT` | GCP project ID | only for Option B |
-| `GOOGLE_CLOUD_LOCATION` | GCP region | only for Option B |
-| `MODEL_ID` | Gemini model name | only for Option B |
-| `GOOGLE_GENAI_USE_VERTEXAI` | Must be `true` | yes |
-
-> When a full URL is set, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, `MODEL_ID`, and `VERTEX_AI_API_VERSION` are ignored — all values come from the URL.
+| Variable | Description | Used by |
+|----------|-------------|---------|
+| `GENAI_BACKEND` | `vertex` (default), `gemini`, or `gateway` | all |
+| `MODEL_ID` | Gemini model name (default `gemini-2.5-flash`) | gemini, vertex (Option B), gateway |
+| `VERTEX_AI_ENDPOINT` | Full URL **or** base hostname | vertex |
+| `VERTEX_AI_API_VERSION` | `v1beta1` (default) or `v1` | vertex (Option B) |
+| `GOOGLE_CLOUD_PROJECT` | GCP project ID | vertex (Option B), gateway |
+| `GOOGLE_CLOUD_LOCATION` | GCP region (default `us-central1`) | vertex (Option B) |
+| `GEMINI_API_KEY` | API key from Google AI Studio | gemini |
+| `NEURALTRUST_GATEWAY_URL` | Gateway base URL | gateway |
+| `NEURALTRUST_API_KEY` | NeuralTrust TG API key | gateway |
+| `GOOGLE_GENAI_USE_VERTEXAI` | Must be `true` for vertex/gateway backends | vertex, gateway |
 
 ---
 
@@ -96,7 +132,7 @@ python3 app.py
 
 ## Chat REST API — `server.py`
 
-A FastAPI server that exposes a stateful chat endpoint backed by Vertex AI Gemini. The model is equipped with three tools that query a local SQLite database of customer data; it calls them automatically whenever relevant.
+A FastAPI server that exposes a stateful chat endpoint backed by Gemini. The model is equipped with three tools that query a local SQLite database of customer data; it calls them automatically whenever relevant.
 
 ### Start the server
 
@@ -112,7 +148,7 @@ Swagger UI is available at **http://localhost:8000/docs** for interactive testin
 
 ```bash
 curl http://localhost:8000/health
-# {"status":"ok"}
+# {"status":"ok","backend":"vertex","model":"gemini-2.5-flash"}
 ```
 
 #### `POST /chat`
@@ -131,7 +167,8 @@ Start a new conversation (omit `session_id`) or continue an existing one (pass i
 ```json
 {
   "session_id": "uuid",
-  "response": "Model answer here"
+  "response": "Model answer here",
+  "backend": "vertex"
 }
 ```
 
@@ -169,7 +206,7 @@ The model can call these automatically when answering questions:
 
 | Tool | Description |
 |------|-------------|
-| `lookup_customer(name)` | Fuzzy search by customer name or company |
+| `lookup_customer(query)` | Fuzzy search by customer name, company, CPF, or credit card number |
 | `list_customers_by_plan(plan)` | Filter customers by `free`, `pro`, or `enterprise` |
 | `get_customer_stats()` | Aggregate stats: total count, total MRR, breakdown by plan |
 
@@ -178,8 +215,26 @@ The SQLite database (`data.db`) is created and seeded with 10 sample customers o
 ### Postman setup
 
 1. Import a new request: `POST http://localhost:8000/chat`
-2. Set **Body → raw → JSON**:
+2. Set **Body > raw > JSON**:
    ```json
    { "message": "Show me a summary of our customer base" }
    ```
 3. Copy the `session_id` from the response and add it to subsequent requests to maintain conversation context.
+
+---
+
+## Project structure
+
+```
+├── app.py            # CLI playground — 9 interactive demos
+├── server.py         # FastAPI chat API with function calling
+├── genai_config.py   # Backend selection & SDK client builder
+├── db.py             # SQLite schema, seed data, and query tools
+├── requirements.txt  # Python dependencies
+├── .env.example      # Template for environment variables
+└── data.db           # SQLite database (auto-created on first run, gitignored)
+```
+
+## License
+
+MIT
